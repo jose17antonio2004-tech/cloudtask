@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CloudTask v1.1</title>
+  <title>CloudTask v1.2</title>
   <style>
   :root {
     --primary: #6d28d9;
@@ -207,17 +207,27 @@
     <header class="header">
       <h1>☁ CloudTask</h1>
       <p>Organiza tus tareas, alcanza tus metas.</p>
-      <span class="version">Versión 1.1</span>
+      <span class="version">Versión 1.2</span>
     </header>
     <section class="content">
       <div class="input-group">
-        <input id="taskInput" type="text" placeholder="Escribe una nueva tarea..." aria-label="Nueva tarea" maxlength="200">
+        <input id="taskInput" type="text" placeholder="Escribe una nueva tarea..." aria-label="Nombre de la tarea" maxlength="200">
         <select id="prioritySelect" aria-label="Prioridad de la tarea">
           <option value="baja">Prioridad baja</option>
           <option value="media" selected>Prioridad media</option>
           <option value="alta">Prioridad alta</option>
         </select>
+        <input id="dueDateInput" type="date" aria-label="Fecha límite (opcional)" title="Fecha límite (opcional)">
         <button id="addTaskBtn" class="primary-btn" type="button">Agregar tarea</button>
+      </div>
+
+      <div class="control-panel">
+        <input id="searchInput" type="text" placeholder="Buscar tareas..." aria-label="Buscar tareas" maxlength="200">
+        <select id="sortSelect" aria-label="Ordenar tareas">
+          <option value="default">Orden original</option>
+          <option value="priority">Por prioridad</option>
+          <option value="date">Por fecha límite</option>
+        </select>
       </div>
 
       <div class="toolbar">
@@ -233,24 +243,30 @@
       <div class="summary">
         <div class="summary-card">Total de tareas<strong id="totalCount">0</strong></div>
         <div class="summary-card">Tareas pendientes<strong id="pendingCount">0</strong></div>
+        <div class="summary-card">Tareas vencidas<strong id="overdueCount">0</strong></div>
       </div>
     </section>
     <footer>
-      CloudTask v1.1 · Práctica de Computación en la Nube<br>
-      <span class="footer-name">Desarrollado por: José Antonio Espinales Gómez y Emilia Julexy Bailon Parraga</span>
+      CloudTask v1.2 · Práctica de Computación en la Nube<br>
+      <span class="footer-name">Desarrollado por: José Antonio Espinales Gómez y Emilia Julexy Bailón Párraga</span>
     </footer>
   </main>
 <script>
 const taskInput = document.getElementById("taskInput");
 const prioritySelect = document.getElementById("prioritySelect");
+const dueDateInput = document.getElementById("dueDateInput");
 const addTaskBtn = document.getElementById("addTaskBtn");
 const taskList = document.getElementById("taskList");
-const pendingCount = document.getElementById("pendingCount");
 const totalCount = document.getElementById("totalCount");
+const pendingCount = document.getElementById("pendingCount");
+const overdueCount = document.getElementById("overdueCount");
 const clearCompletedBtn = document.getElementById("clearCompletedBtn");
 const filterButtons = document.querySelectorAll(".filter-btn");
+const searchInput = document.getElementById("searchInput");
+const sortSelect = document.getElementById("sortSelect");
 const STORAGE_KEY = "cloudTaskTasks";
 let currentFilter = "all";
+let editingId = null;
 
 function loadTasks() {
   try {
@@ -271,9 +287,9 @@ function loadTasks() {
     console.warn("No se pudieron leer las tareas guardadas.", error);
   }
   return [
-    { id: 1, text: "Subir proyecto a GitHub", completed: false, priority: "alta" },
-    { id: 2, text: "Desplegar aplicación en Vercel", completed: false, priority: "media" },
-    { id: 3, text: "Probar aplicación desde el teléfono", completed: true, priority: "baja" }
+    { id: 1, text: "Subir proyecto a GitHub", completed: false, priority: "alta", dueDate: "" },
+    { id: 2, text: "Desplegar aplicación en Vercel", completed: false, priority: "media", dueDate: "" },
+    { id: 3, text: "Probar aplicación desde el teléfono", completed: true, priority: "baja", dueDate: "" }
   ];
 }
 let tasks = loadTasks();
@@ -285,22 +301,50 @@ function saveTasks() {
     console.warn("No se pudieron guardar las tareas en este navegador.", error);
   }
 }
+function isOverdue(task) {
+  if (!task.dueDate || task.completed) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(`${task.dueDate}T00:00:00`);
+  return !Number.isNaN(due.getTime()) && due < today;
+}
+function formatDate(dateString) {
+  if (!dateString) return "";
+  const date = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return date.toLocaleDateString("es-EC", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
 function renderTasks() {
   taskList.replaceChildren();
-  const filteredTasks = tasks.filter(task => {
-    if (currentFilter === "pending") return !task.completed;
-    if (currentFilter === "completed") return task.completed;
-    return true;
-  });
-  if (filteredTasks.length === 0) {
+  let visibleTasks = [...tasks];
+  if (currentFilter === "pending") visibleTasks = visibleTasks.filter(task => !task.completed);
+  if (currentFilter === "completed") visibleTasks = visibleTasks.filter(task => task.completed);
+  const query = searchInput.value.trim().toLocaleLowerCase("es");
+  if (query) visibleTasks = visibleTasks.filter(task => task.text.toLocaleLowerCase("es").includes(query));
+
+  if (sortSelect.value === "priority") {
+    const order = { alta: 1, media: 2, baja: 3 };
+    visibleTasks.sort((a, b) => (order[a.priority] || 2) - (order[b.priority] || 2));
+  } else if (sortSelect.value === "date") {
+    visibleTasks.sort((a, b) => {
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+  }
+
+  if (visibleTasks.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty";
-    empty.textContent = "No hay tareas para mostrar";
+    empty.textContent = "No hay tareas que coincidan con la búsqueda o el filtro";
     taskList.appendChild(empty);
   }
-  filteredTasks.forEach(task => {
+
+  visibleTasks.forEach(task => {
+    const overdue = isOverdue(task);
     const li = document.createElement("li");
-    li.className = "task" + (task.completed ? " completed" : "");
+    li.className = "task" + (task.completed ? " completed" : "") + (overdue ? " overdue" : "");
     const left = document.createElement("div");
     left.className = "task-left";
     const checkbox = document.createElement("input");
@@ -320,30 +364,70 @@ function renderTasks() {
     const priorityNames = { baja: "Baja", media: "Media", alta: "Alta" };
     priority.textContent = `Prioridad ${priorityNames[task.priority] || "Media"}`;
     meta.appendChild(priority);
+    if (task.dueDate) {
+      const date = document.createElement("span");
+      date.className = "date-badge";
+      date.textContent = `Fecha límite: ${formatDate(task.dueDate)}`;
+      meta.appendChild(date);
+    }
+    if (overdue) {
+      const badge = document.createElement("span");
+      badge.className = "overdue-badge";
+      badge.textContent = "Vencida";
+      meta.appendChild(badge);
+    }
     info.append(text, meta);
     left.append(checkbox, info);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const edit = document.createElement("button");
+    edit.className = "edit-btn";
+    edit.type = "button";
+    edit.textContent = "Editar";
+    edit.addEventListener("click", () => editTask(task.id));
     const del = document.createElement("button");
     del.className = "delete-btn";
     del.type = "button";
     del.textContent = "Eliminar";
     del.addEventListener("click", () => deleteTask(task.id));
-    li.append(left, del);
+    actions.append(edit, del);
+    li.append(left, actions);
     taskList.appendChild(li);
   });
   updateCounters();
   saveTasks();
 }
-function addTask() {
+function addOrUpdateTask() {
   const text = taskInput.value.trim();
   if (!text) {
-    alert("Escribe una tarea antes de agregarla.");
+    alert("Escribe una tarea antes de guardarla.");
     taskInput.focus();
     return;
   }
-  tasks.push({ id: Date.now(), text, completed: false, priority: prioritySelect.value });
+  const priority = prioritySelect.value;
+  const dueDate = dueDateInput.value;
+  if (editingId !== null) {
+    tasks = tasks.map(task => task.id === editingId ? { ...task, text, priority, dueDate } : task);
+    editingId = null;
+    addTaskBtn.textContent = "Agregar tarea";
+  } else {
+    tasks.push({ id: Date.now(), text, completed: false, priority, dueDate });
+  }
   taskInput.value = "";
   prioritySelect.value = "media";
+  dueDateInput.value = "";
   renderTasks();
+  taskInput.focus();
+}
+function editTask(id) {
+  const task = tasks.find(item => item.id === id);
+  if (!task) return;
+  taskInput.value = task.text;
+  prioritySelect.value = task.priority;
+  dueDateInput.value = task.dueDate || "";
+  editingId = id;
+  addTaskBtn.textContent = "Guardar cambios";
   taskInput.focus();
 }
 function toggleTask(id) {
@@ -352,7 +436,15 @@ function toggleTask(id) {
 }
 function deleteTask(id) {
   tasks = tasks.filter(task => task.id !== id);
+  if (editingId === id) resetEditForm();
   renderTasks();
+}
+function resetEditForm() {
+  editingId = null;
+  taskInput.value = "";
+  prioritySelect.value = "media";
+  dueDateInput.value = "";
+  addTaskBtn.textContent = "Agregar tarea";
 }
 function clearCompletedTasks() {
   if (!tasks.some(task => task.completed)) {
@@ -361,19 +453,23 @@ function clearCompletedTasks() {
   }
   if (confirm("¿Eliminar todas las tareas completadas?")) {
     tasks = tasks.filter(task => !task.completed);
+    if (editingId !== null && !tasks.some(task => task.id === editingId)) resetEditForm();
     renderTasks();
   }
 }
 function updateCounters() {
   totalCount.textContent = tasks.length;
   pendingCount.textContent = tasks.filter(task => !task.completed).length;
+  overdueCount.textContent = tasks.filter(isOverdue).length;
 }
 
-addTaskBtn.addEventListener("click", addTask);
+addTaskBtn.addEventListener("click", addOrUpdateTask);
 taskInput.addEventListener("keydown", event => {
-  if (event.key === "Enter") addTask();
+  if (event.key === "Enter") addOrUpdateTask();
 });
 clearCompletedBtn.addEventListener("click", clearCompletedTasks);
+searchInput.addEventListener("input", renderTasks);
+sortSelect.addEventListener("change", renderTasks);
 filterButtons.forEach(button => {
   button.addEventListener("click", () => {
     filterButtons.forEach(btn => btn.classList.remove("active"));
